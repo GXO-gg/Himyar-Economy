@@ -1,0 +1,1 @@
+"""Himyar Economy cogs."""

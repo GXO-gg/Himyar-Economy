@@ -1,0 +1,27 @@
+# /etc/systemd/system/himyar-economy.service
+[Unit]
+Description=Himyar Economy Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=himyar
+Group=himyar
+WorkingDirectory=/home/himyar/bots/himyar-economy
+ExecStart=/home/himyar/bots/himyar-economy/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=himyar-economy
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/himyar/bots/himyar-economy
+
+[Install]
+WantedBy=multi-user.target
