@@ -61,6 +61,7 @@ PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS guilds (
     guild_id              INTEGER PRIMARY KEY,
     currency_name         TEXT    NOT NULL DEFAULT 'Coins',
+    role_multipliers      TEXT    NOT NULL DEFAULT '{}',
     currency_emoji        TEXT    NOT NULL DEFAULT '🪙',
     start_balance         INTEGER NOT NULL DEFAULT 0,
 
@@ -232,6 +233,7 @@ CREATE TABLE IF NOT EXISTS strings (
 
 GUILD_DEFAULTS = {
     "currency_name": "Coins", "currency_emoji": "🪙", "start_balance": 0,
+    "role_multipliers": "{}",
     "chat_enabled": 1, "chat_min": 1, "chat_max": 3, "chat_cooldown": 60,
     "voice_enabled": 1, "voice_per_minute": 1,
     "daily_amount": 100, "daily_streak_bonus": 10, "daily_streak_cap": 500,
@@ -251,6 +253,12 @@ GUILD_DEFAULTS = {
     "embed_color": 0x1E90FF, "setup_complete": 0, "last_heist": None,
 }
 GUILD_COLUMNS = set(GUILD_DEFAULTS)
+
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS never touches
+# a table that already exists, so a live database needs them added explicitly.
+GUILD_MIGRATIONS = {
+    "role_multipliers": "TEXT NOT NULL DEFAULT '{}'",
+}
 MEMBER_COLUMNS = {
     "wallet", "bank", "total_earned", "earned_today", "earn_day", "paid_today",
     "pay_day", "last_daily", "streak", "best_streak", "last_work", "last_rob",
@@ -278,7 +286,18 @@ class Database:
         self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Add any columns introduced after this database was first created."""
+        async with self._conn.execute("PRAGMA table_info(guilds)") as cur:
+            existing = {row[1] for row in await cur.fetchall()}
+        for column, ddl in GUILD_MIGRATIONS.items():
+            if column not in existing:
+                await self._conn.execute(
+                    f"ALTER TABLE guilds ADD COLUMN {column} {ddl}"
+                )
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -325,11 +344,28 @@ class Database:
         await self.get_guild(guild_id)
         if isinstance(fields.get("last_heist"), dt.datetime):
             fields["last_heist"] = iso(fields["last_heist"])
+        if isinstance(fields.get("role_multipliers"), dict):
+            fields["role_multipliers"] = json.dumps(
+                {str(k): float(v) for k, v in fields["role_multipliers"].items()}
+            )
         assignments = ", ".join(f"{k} = ?" for k in fields)
         await self._execute(
             f"UPDATE guilds SET {assignments} WHERE guild_id = ?",
             (*fields.values(), guild_id),
         )
+
+    async def get_role_multipliers(self, guild_id: int) -> dict[int, float]:
+        settings = await self.get_guild(guild_id)
+        raw = settings.get("role_multipliers")
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (TypeError, ValueError):
+            data = {}
+        return {int(k): float(v) for k, v in data.items()}
+
+    async def set_role_multipliers(self, guild_id: int,
+                                   mults: dict[int, float]) -> None:
+        await self.update_guild(guild_id, role_multipliers=mults)
 
     async def wipe_guild(self, guild_id: int) -> None:
         await self._execute(

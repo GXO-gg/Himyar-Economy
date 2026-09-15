@@ -204,3 +204,19 @@ def split_pot(pot: int, winners: int) -> tuple[int, int]:
 
 def format_amount(amount: int, name: str = "Coins", emoji: str = "🪙") -> str:
     return f"{emoji} **{int(amount):,}** {name}"
+
+
+def best_multiplier(role_ids, role_multipliers: dict) -> float:
+    """Best earning multiplier a member qualifies for.
+
+    Highest wins rather than multiplying together — someone holding Booster and
+    VIP gets the better of the two, not the product. Stacking is how an economy
+    quietly inflates.
+    """
+    if not role_multipliers:
+        return 1.0
+    values = [float(role_multipliers[int(r)]) for r in role_ids
+              if int(r) in role_multipliers]
+    if not values:
+        return 1.0
+    return max(1.0, max(values))
