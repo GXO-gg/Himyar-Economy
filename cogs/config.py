@@ -63,6 +63,8 @@ class Config(commands.Cog):
                                 guild_only=True, default_permissions=MANAGE)
     messages_group = app_commands.Group(name="messages", description="Edit any text the bot sends",
                                         parent=config)
+    multiplier_group = app_commands.Group(name="multiplier", description="Bonus coins for roles",
+                                          parent=config)
     eco = app_commands.Group(name="eco", description="Staff economy tools",
                              guild_only=True, default_permissions=MANAGE)
 
@@ -234,7 +236,77 @@ class Config(commands.Cog):
         embed.add_field(name="Shop items", value=str(len(items)))
         embed.add_field(name="In circulation",
                         value=f"{circulating:,} across {holders} members")
+        mults = await self.bot.db.get_role_multipliers(guild.id)
+        embed.add_field(
+            name="Role multipliers",
+            value=("\n".join(f"<@&{rid}> → ×{m:g}" for rid, m in mults.items())
+                   if mults else "*none — `/config multiplier add`*"),
+            inline=False,
+        )
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ─── /config multiplier … ─────────────────────────────────────────────────
+    @multiplier_group.command(name="add", description="Give a role bonus coins")
+    @app_commands.describe(role="The role to reward",
+                           multiplier="e.g. 1.5 for 50% more coins")
+    async def multiplier_add(self, interaction: discord.Interaction, role: discord.Role,
+                             multiplier: app_commands.Range[float, 1.1, 10.0]) -> None:
+        settings = await self.guard(interaction)
+        if settings is None:
+            return
+        mults = await self.bot.db.get_role_multipliers(interaction.guild.id)
+        mults[role.id] = float(multiplier)
+        await self.bot.db.set_role_multipliers(interaction.guild.id, mults)
+        await interaction.response.send_message(
+            embed=util.ok_embed(
+                settings,
+                f"{role.mention} now earns **×{multiplier:g}** coins.\n\n"
+                "Applies to chat, voice, `/daily` and `/work`. Games, robbery and "
+                "transfers are untouched, so nobody can multiply coins that came "
+                "out of another member's wallet.\n"
+                "If someone holds two boosted roles, the higher one wins.",
+            ),
+            ephemeral=True,
+        )
+
+    @multiplier_group.command(name="remove", description="Remove a role's bonus coins")
+    @app_commands.describe(role="The role to stop rewarding")
+    async def multiplier_remove(self, interaction: discord.Interaction,
+                                role: discord.Role) -> None:
+        settings = await self.guard(interaction)
+        if settings is None:
+            return
+        mults = await self.bot.db.get_role_multipliers(interaction.guild.id)
+        if role.id not in mults:
+            return await interaction.response.send_message(
+                embed=util.err_embed(f"{role.mention} has no multiplier."), ephemeral=True
+            )
+        mults.pop(role.id, None)
+        await self.bot.db.set_role_multipliers(interaction.guild.id, mults)
+        await interaction.response.send_message(
+            embed=util.ok_embed(settings, f"{role.mention} earns at the normal rate again."),
+            ephemeral=True,
+        )
+
+    @multiplier_group.command(name="list", description="Roles with bonus coins")
+    async def multiplier_list(self, interaction: discord.Interaction) -> None:
+        settings = await self.guard(interaction)
+        if settings is None:
+            return
+        mults = await self.bot.db.get_role_multipliers(interaction.guild.id)
+        if not mults:
+            return await interaction.response.send_message(
+                embed=util.base_embed(
+                    settings=settings,
+                    description="No role multipliers yet. `/config multiplier add` to "
+                                "reward boosters or VIPs.",
+                ),
+                ephemeral=True,
+            )
+        embed = util.base_embed(settings=settings, title="⚡ Role multipliers")
+        embed.description = "\n".join(f"<@&{rid}> → ×{m:g}" for rid, m in mults.items())
+        embed.set_footer(text="Highest wins · chat, voice, /daily and /work only")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ─── /config earning ──────────────────────────────────────────────────────
     @config.command(name="earning", description="Chat, voice, daily and work settings")

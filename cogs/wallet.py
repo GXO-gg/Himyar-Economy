@@ -57,9 +57,27 @@ class Wallet(commands.Cog):
         except discord.HTTPException:
             pass
 
+    async def role_multiplier(self, guild_id: int, user_id: int) -> float:
+        """Best role multiplier for this member, 1.0 if they have none."""
+        mults = await self.bot.db.get_role_multipliers(guild_id)
+        if not mults:
+            return 1.0
+        guild = self.bot.get_guild(guild_id)
+        member = guild.get_member(user_id) if guild else None
+        if member is None:
+            return 1.0
+        return economy.best_multiplier([r.id for r in member.roles], mults)
+
     async def award(self, guild_id: int, user_id: int, amount: int, kind: str,
                     settings: dict) -> int:
-        """Give coins that count toward the daily cap. Returns what was paid."""
+        """Give coins that count toward the daily cap. Returns what was paid.
+
+        The role bonus is applied before the daily cap, so a boosted member
+        reaches the same ceiling sooner rather than earning past it.
+        """
+        multiplier = await self.role_multiplier(guild_id, user_id)
+        if multiplier != 1.0:
+            amount = int(round(max(0, int(amount)) * multiplier))
         day = today_key()
         already = await self.bot.db.earned_today(guild_id, user_id, day)
         amount = economy.apply_daily_cap(amount, already, int(settings.get("daily_earn_cap") or 0))
